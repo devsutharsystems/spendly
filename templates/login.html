@@ -13,6 +13,11 @@
         </div>
 
         <div class="auth-card">
+            {% with messages = get_flashed_messages() %}
+            {% if messages %}
+            <div class="auth-success">{{ messages[0] }}</div>
+            {% endif %}
+            {% endwith %}
             {% if error %}
             <div class="auth-error">{{ error }}</div>
             {% endif %}
