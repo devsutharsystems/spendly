@@ -3,6 +3,7 @@
 {% block title %}Profile — Spendly{% endblock %}
 
 {% block content %}
+{% set empty_msg = "No expenses in this period." if is_filtered else "No expenses yet." %}
 
 <section class="profile-section">
     <div class="profile-container">
@@ -14,6 +15,30 @@
                 <p class="profile-email">{{ user.email }}</p>
                 <p class="profile-since">Member since {{ user.member_since }}</p>
             </div>
+        </div>
+
+        <div class="filter-bar">
+            {% with messages = get_flashed_messages() %}
+            {% for message in messages %}
+            <div class="auth-error">{{ message }}</div>
+            {% endfor %}
+            {% endwith %}
+            <div class="filter-presets">
+                {% for p in presets %}
+                <a href="{{ p.url }}" class="filter-preset{% if p.active %} active{% endif %}">{{ p.label }}</a>
+                {% endfor %}
+            </div>
+            <form method="get" action="{{ url_for('profile') }}" class="filter-custom{% if custom_active %} active{% endif %}">
+                <label class="filter-field">
+                    <span class="filter-label">From</span>
+                    <input type="date" name="date_from" value="{{ date_from or '' }}" required>
+                </label>
+                <label class="filter-field">
+                    <span class="filter-label">To</span>
+                    <input type="date" name="date_to" value="{{ date_to or '' }}" required>
+                </label>
+                <button type="submit" class="btn-primary">Apply</button>
+            </form>
         </div>
 
         <div class="stats-row">
@@ -58,7 +83,7 @@
                     </table>
                 </div>
                 {% else %}
-                <p class="panel-empty">No expenses yet.</p>
+                <p class="panel-empty">{{ empty_msg }}</p>
                 {% endif %}
             </div>
 
@@ -79,7 +104,7 @@
                     {% endfor %}
                 </ul>
                 {% else %}
-                <p class="panel-empty">No expenses yet.</p>
+                <p class="panel-empty">{{ empty_msg }}</p>
                 {% endif %}
             </div>
         </div>

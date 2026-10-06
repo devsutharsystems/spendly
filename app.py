@@ -1,5 +1,7 @@
+import calendar
 import os
 import sqlite3
+from datetime import date, datetime
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -120,9 +122,8 @@ def privacy():
 # ------------------------------------------------------------------ #
 
 # --- SECTION: transaction history (subagent 1) ---
-def _build_transactions(user_id):
-    from datetime import datetime
-
+def _build_transactions(user_id, date_from=None, date_to=None):
+    transactions = get_recent_transactions(user_id, date_from=date_from, date_to=date_to)
     return [
         {
             "date": datetime.strptime(t["date"][:10], "%Y-%m-%d").strftime("%d %b %Y"),
@@ -131,13 +132,13 @@ def _build_transactions(user_id):
             "amount": f"₹{t['amount']:.2f}",
             "category_class": t["category"].lower(),
         }
-        for t in get_recent_transactions(user_id)
+        for t in transactions
     ]
 
 
 # --- SECTION: summary stats (subagent 2) ---
-def _build_stats(user_id):
-    stats = get_summary_stats(user_id)
+def _build_stats(user_id, date_from=None, date_to=None):
+    stats = get_summary_stats(user_id, date_from=date_from, date_to=date_to)
     return {
         "total_spent": f"₹{stats['total_spent']:.2f}",
         "transaction_count": int(stats["transaction_count"]),
@@ -146,9 +147,9 @@ def _build_stats(user_id):
 
 
 # --- SECTION: category breakdown (subagent 3) ---
-def _build_categories(user_id):
+def _build_categories(user_id, date_from=None, date_to=None):
     categories = []
-    for c in get_category_breakdown(user_id):
+    for c in get_category_breakdown(user_id, date_from=date_from, date_to=date_to):
         step = min(100, max(0, int(round(c["pct"] / 5.0)) * 5))
         categories.append(
             {
@@ -159,6 +160,55 @@ def _build_categories(user_id):
             }
         )
     return categories
+
+
+def _parse_date_filter(args):
+    """Return ((date_from, date_to), error); dates are ISO strings or None if unusable."""
+    parsed = []
+    for key in ("date_from", "date_to"):
+        value = args.get(key, "").strip()
+        try:
+            parsed.append(datetime.strptime(value, "%Y-%m-%d").date())
+        except ValueError:
+            return (None, None), None
+
+    start, end = parsed
+    if start > end:
+        return (None, None), "Start date must be before end date."
+    return (start.isoformat(), end.isoformat()), None
+
+
+def _months_ago(today, months):
+    index = today.year * 12 + today.month - 1 - months
+    year, month = divmod(index, 12)
+    month += 1
+    return date(year, month, min(today.day, calendar.monthrange(year, month)[1]))
+
+
+def _build_presets(today, date_from, date_to):
+    ranges = [
+        ("This Month", today.replace(day=1)),
+        ("Last 3 Months", _months_ago(today, 3)),
+        ("Last 6 Months", _months_ago(today, 6)),
+    ]
+    presets = []
+    for label, start in ranges:
+        start_iso, end_iso = start.isoformat(), today.isoformat()
+        presets.append(
+            {
+                "label": label,
+                "url": url_for("profile", date_from=start_iso, date_to=end_iso),
+                "active": (date_from, date_to) == (start_iso, end_iso),
+            }
+        )
+    presets.append(
+        {
+            "label": "All Time",
+            "url": url_for("profile"),
+            "active": date_from is None,
+        }
+    )
+    return presets
 
 
 @app.route("/profile")
@@ -178,12 +228,23 @@ def profile():
         "email": row["email"],
         "member_since": row["member_since"],
     }
+    (date_from, date_to), filter_error = _parse_date_filter(request.args)
+    if filter_error:
+        flash(filter_error)
+    is_filtered = date_from is not None
+    presets = _build_presets(date.today(), date_from, date_to)
+    custom_active = is_filtered and not any(p["active"] for p in presets)
     return render_template(
         "profile.html",
         user=user,
-        stats=_build_stats(user_id),
-        transactions=_build_transactions(user_id),
-        categories=_build_categories(user_id),
+        stats=_build_stats(user_id, date_from, date_to),
+        transactions=_build_transactions(user_id, date_from, date_to),
+        categories=_build_categories(user_id, date_from, date_to),
+        date_from=date_from,
+        date_to=date_to,
+        presets=presets,
+        is_filtered=is_filtered,
+        custom_active=custom_active,
     )
 
 
