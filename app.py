@@ -5,6 +5,7 @@ from flask import Flask, flash, redirect, render_template, request, session, url
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from database.db import get_db, init_db, seed_db
+from database.queries import get_user_by_id, get_recent_transactions, get_category_breakdown, get_summary_stats
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
@@ -118,52 +119,71 @@ def privacy():
 # Placeholder routes — students will implement these                  #
 # ------------------------------------------------------------------ #
 
+# --- SECTION: transaction history (subagent 1) ---
+def _build_transactions(user_id):
+    from datetime import datetime
+
+    return [
+        {
+            "date": datetime.strptime(t["date"][:10], "%Y-%m-%d").strftime("%d %b %Y"),
+            "description": t["description"] or "",
+            "category": t["category"],
+            "amount": f"₹{t['amount']:.2f}",
+            "category_class": t["category"].lower(),
+        }
+        for t in get_recent_transactions(user_id)
+    ]
+
+
+# --- SECTION: summary stats (subagent 2) ---
+def _build_stats(user_id):
+    stats = get_summary_stats(user_id)
+    return {
+        "total_spent": f"₹{stats['total_spent']:.2f}",
+        "transaction_count": int(stats["transaction_count"]),
+        "top_category": stats["top_category"],
+    }
+
+
+# --- SECTION: category breakdown (subagent 3) ---
+def _build_categories(user_id):
+    categories = []
+    for c in get_category_breakdown(user_id):
+        step = min(100, max(0, int(round(c["pct"] / 5.0)) * 5))
+        categories.append(
+            {
+                "name": c["name"],
+                "total": "₹{:.2f}".format(c["amount"]),
+                "pct": c["pct"],
+                "bar_class": "bar-w-{}".format(step),
+            }
+        )
+    return categories
+
+
 @app.route("/profile")
 def profile():
-    if not session.get("user_id"):
+    user_id = session.get("user_id")
+    if not user_id:
         return redirect(url_for("login"))
 
-    # Hardcoded display data — Step 5 replaces this with real database queries.
-    name = session.get("user_name", "")
+    row = get_user_by_id(user_id)
+    if row is None:
+        session.clear()
+        return redirect(url_for("login"))
+
     user = {
-        "name": name,
-        "initials": "".join(part[0] for part in name.split()[:2]).upper(),
-        "email": "demo@spendly.com",
-        "member_since": "January 2026",
+        "name": row["name"],
+        "initials": "".join(part[0] for part in row["name"].split()[:2]).upper(),
+        "email": row["email"],
+        "member_since": row["member_since"],
     }
-    stats = {
-        "total_spent": "₹354.79",
-        "transaction_count": 8,
-        "top_category": "Bills",
-    }
-    transactions = [
-        {"date": "25 Sep 2026", "description": "Weekly groceries", "category": "Food", "amount": "₹54.30"},
-        {"date": "20 Sep 2026", "description": "Gift wrapping", "category": "Other", "amount": "₹9.25"},
-        {"date": "15 Sep 2026", "description": "New shoes", "category": "Shopping", "amount": "₹64.99"},
-        {"date": "12 Sep 2026", "description": "Movie tickets", "category": "Entertainment", "amount": "₹18.00"},
-        {"date": "08 Sep 2026", "description": "Pharmacy", "category": "Health", "amount": "₹30.75"},
-        {"date": "05 Sep 2026", "description": "Electricity bill", "category": "Bills", "amount": "₹120.00"},
-        {"date": "03 Sep 2026", "description": "Monthly bus pass", "category": "Transport", "amount": "₹45.00"},
-        {"date": "01 Sep 2026", "description": "Lunch at cafe", "category": "Food", "amount": "₹12.50"},
-    ]
-    for txn in transactions:
-        txn["category_class"] = txn["category"].lower()
-    # bar_class is the share of total spend rounded to the nearest 5, matching .bar-w-N in style.css
-    categories = [
-        {"name": "Bills", "total": "₹120.00", "bar_class": "bar-w-35"},
-        {"name": "Food", "total": "₹66.80", "bar_class": "bar-w-20"},
-        {"name": "Shopping", "total": "₹64.99", "bar_class": "bar-w-20"},
-        {"name": "Transport", "total": "₹45.00", "bar_class": "bar-w-15"},
-        {"name": "Health", "total": "₹30.75", "bar_class": "bar-w-10"},
-        {"name": "Entertainment", "total": "₹18.00", "bar_class": "bar-w-5"},
-        {"name": "Other", "total": "₹9.25", "bar_class": "bar-w-5"},
-    ]
     return render_template(
         "profile.html",
         user=user,
-        stats=stats,
-        transactions=transactions,
-        categories=categories,
+        stats=_build_stats(user_id),
+        transactions=_build_transactions(user_id),
+        categories=_build_categories(user_id),
     )
 
 
