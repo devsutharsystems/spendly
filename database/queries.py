@@ -116,3 +116,20 @@ def get_category_breakdown(user_id, date_from=None, date_to=None):
     ]
     result[0]["pct"] += 100 - sum(c["pct"] for c in result)
     return result
+
+
+# --- SECTION: add expense ---
+
+def insert_expense(user_id, amount, category, expense_date, description):
+    """Insert an expense for the user and return its new id."""
+    conn = get_db()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO expenses (user_id, amount, category, date, description) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, amount, category, expense_date, description),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()

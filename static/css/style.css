@@ -924,3 +924,27 @@ a { color: inherit; text-decoration: none; }
     .coming-soon-section { padding: 3rem 1rem 2rem; }
     .coming-soon-card { padding: 2.5rem 1.25rem; }
 }
+
+/* ------------------------------------------------------------------ */
+/* Add expense                                                         */
+/* ------------------------------------------------------------------ */
+
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.panel-head .panel-title { margin-bottom: 0; }
+
+.form-cancel {
+    display: block;
+    margin-top: 1rem;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--ink-muted);
+}
+
+.form-cancel:hover { color: var(--ink); }
