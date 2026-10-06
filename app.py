@@ -1,20 +1,76 @@
 import calendar
+import hmac
+import math
 import os
+import secrets
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from functools import wraps
 
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from database.db import get_db, init_db, seed_db
-from database.queries import get_user_by_id, get_recent_transactions, get_category_breakdown, get_summary_stats
+from database.db import CATEGORIES, get_db, init_db, seed_db
+from database.queries import (
+    get_category_breakdown,
+    get_recent_transactions,
+    get_summary_stats,
+    get_user_by_id,
+    insert_expense,
+)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+# No hardcoded fallback: without SECRET_KEY a random key is used, which only
+# means sessions reset when the app restarts.
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
+
+MAX_AMOUNT = 10_000_000
+MIN_EXPENSE_DATE = date(2000, 1, 1)
+MAX_FUTURE_DAYS = 365
 
 with app.app_context():
     init_db()
     seed_db()
+
+
+# ------------------------------------------------------------------ #
+# Helpers                                                             #
+# ------------------------------------------------------------------ #
+
+def login_required(view):
+    """Redirect to the login page when no user is signed in."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def _csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(16)
+    return session["csrf_token"]
+
+
+@app.context_processor
+def inject_csrf_token():
+    return {"csrf_token": _csrf_token}
+
+
+@app.before_request
+def protect_from_csrf():
+    if request.method != "POST":
+        return None
+    if app.config.get("TESTING") and not app.config.get("CSRF_TEST_ENFORCE"):
+        return None
+    expected = session.get("csrf_token", "")
+    submitted = request.form.get("csrf_token", "")
+    if not expected or not hmac.compare_digest(expected, submitted):
+        abort(400)
+    return None
 
 
 # ------------------------------------------------------------------ #
@@ -212,11 +268,9 @@ def _build_presets(today, date_from, date_to):
 
 
 @app.route("/profile")
+@login_required
 def profile():
-    user_id = session.get("user_id")
-    if not user_id:
-        return redirect(url_for("login"))
-
+    user_id = session["user_id"]
     row = get_user_by_id(user_id)
     if row is None:
         session.clear()
@@ -248,9 +302,72 @@ def profile():
     )
 
 
-@app.route("/expenses/add")
+@app.route("/analytics")
+@login_required
+def analytics():
+    return render_template("analytics.html")
+
+
+def _validate_expense(form):
+    """Return (values, error). values is cleaned only when error is None."""
+    values = {
+        "amount": form.get("amount", "").strip(),
+        "category": form.get("category", ""),
+        "date": form.get("date", "").strip(),
+        "description": form.get("description", "").strip(),
+    }
+
+    try:
+        amount = float(values["amount"])
+    except ValueError:
+        return values, "Please enter an amount greater than 0."
+    if not math.isfinite(amount) or amount <= 0:
+        return values, "Please enter an amount greater than 0."
+    if amount > MAX_AMOUNT:
+        return values, "Amount must be at most ₹{:,}.".format(MAX_AMOUNT)
+
+    if values["category"] not in CATEGORIES:
+        return values, "Please choose a valid category."
+
+    try:
+        expense_date = datetime.strptime(values["date"], "%Y-%m-%d").date()
+    except ValueError:
+        return values, "Please enter a valid date."
+    if expense_date < MIN_EXPENSE_DATE or expense_date > date.today() + timedelta(days=MAX_FUTURE_DAYS):
+        return values, "Date is out of range."
+
+    if len(values["description"]) > 200:
+        return values, "Description must be 200 characters or fewer."
+
+    return {
+        **values,
+        "amount": round(amount, 2),
+        "description": values["description"] or None,
+    }, None
+
+
+@app.route("/expenses/add", methods=["GET", "POST"])
+@login_required
 def add_expense():
-    return "Add expense — coming in Step 7"
+    form = {"date": date.today().isoformat()}
+    error = None
+
+    if request.method == "POST":
+        form, error = _validate_expense(request.form)
+        if error is None:
+            insert_expense(
+                session["user_id"],
+                form["amount"],
+                form["category"],
+                form["date"],
+                form["description"],
+            )
+            flash("Expense added.", "success")
+            return redirect(url_for("profile"))
+
+    return render_template(
+        "add_expense.html", categories=CATEGORIES, form=form, error=error
+    )
 
 
 @app.route("/expenses/<int:id>/edit")
@@ -264,4 +381,4 @@ def delete_expense(id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=os.environ.get("FLASK_DEBUG") == "1", port=5001)

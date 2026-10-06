@@ -18,9 +18,9 @@
         </div>
 
         <div class="filter-bar">
-            {% with messages = get_flashed_messages() %}
-            {% for message in messages %}
-            <div class="auth-error">{{ message }}</div>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+            <div class="{{ 'auth-success' if category == 'success' else 'auth-error' }}">{{ message }}</div>
             {% endfor %}
             {% endwith %}
             <div class="filter-presets">
@@ -58,7 +58,10 @@
 
         <div class="profile-panels">
             <div class="panel">
-                <h2 class="panel-title">Recent transactions</h2>
+                <div class="panel-head">
+                    <h2 class="panel-title">Recent transactions</h2>
+                    <a href="{{ url_for('add_expense') }}" class="btn-primary">Add Expense</a>
+                </div>
                 {% if transactions %}
                 <div class="table-wrap">
                     <table class="txn-table">
