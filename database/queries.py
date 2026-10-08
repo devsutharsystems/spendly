@@ -33,13 +33,14 @@ def _date_clause(date_from, date_to):
 
 # --- SECTION: transaction history (subagent 1) ---
 
+
 def get_recent_transactions(user_id, limit=10, date_from=None, date_to=None):
     """Return the user's latest expenses, newest first, as a list of dicts."""
     clause, params = _date_clause(date_from, date_to)
     conn = get_db()
     try:
         rows = conn.execute(
-            "SELECT date, description, category, amount FROM expenses "
+            "SELECT id, date, description, category, amount FROM expenses "
             "WHERE user_id = ?" + clause + " ORDER BY date DESC, id DESC LIMIT ?",
             [user_id, *params, limit],
         ).fetchall()
@@ -48,6 +49,7 @@ def get_recent_transactions(user_id, limit=10, date_from=None, date_to=None):
 
     return [
         {
+            "id": r["id"],
             "date": r["date"],
             "description": r["description"],
             "category": r["category"],
@@ -58,6 +60,7 @@ def get_recent_transactions(user_id, limit=10, date_from=None, date_to=None):
 
 
 # --- SECTION: summary stats (subagent 2) ---
+
 
 def get_summary_stats(user_id, date_from=None, date_to=None):
     """Return {total_spent, transaction_count, top_category} for the user."""
@@ -70,8 +73,9 @@ def get_summary_stats(user_id, date_from=None, date_to=None):
             [user_id, *params],
         ).fetchone()
         top = conn.execute(
-            "SELECT category FROM expenses WHERE user_id = ?" + clause +
-            " GROUP BY category ORDER BY SUM(amount) DESC, category ASC LIMIT 1",
+            "SELECT category FROM expenses WHERE user_id = ?"
+            + clause
+            + " GROUP BY category ORDER BY SUM(amount) DESC, category ASC LIMIT 1",
             [user_id, *params],
         ).fetchone()
     finally:
@@ -87,6 +91,7 @@ def get_summary_stats(user_id, date_from=None, date_to=None):
 
 
 # --- SECTION: category breakdown (subagent 3) ---
+
 
 def get_category_breakdown(user_id, date_from=None, date_to=None):
     """Return [{name, amount, pct}] ordered by amount DESC; pct sums to 100."""
@@ -120,6 +125,7 @@ def get_category_breakdown(user_id, date_from=None, date_to=None):
 
 # --- SECTION: add expense ---
 
+
 def insert_expense(user_id, amount, category, expense_date, description):
     """Insert an expense for the user and return its new id."""
     conn = get_db()
@@ -131,5 +137,45 @@ def insert_expense(user_id, amount, category, expense_date, description):
         )
         conn.commit()
         return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+# --- SECTION: edit expense ---
+
+def get_expense_by_id(expense_id, user_id):
+    """Return the expense as a dict if it belongs to the user, else None."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT id, amount, category, date, description FROM expenses "
+            "WHERE id = ? AND user_id = ?",
+            (expense_id, user_id),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "amount": float(row["amount"]),
+        "category": row["category"],
+        "date": row["date"],
+        "description": row["description"],
+    }
+
+
+def update_expense(expense_id, user_id, amount, category, expense_date, description):
+    """Update the user's expense; return True if a row was changed."""
+    conn = get_db()
+    try:
+        cursor = conn.execute(
+            "UPDATE expenses SET amount = ?, category = ?, date = ?, description = ? "
+            "WHERE id = ? AND user_id = ?",
+            (amount, category, expense_date, description, expense_id, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()

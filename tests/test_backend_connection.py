@@ -33,6 +33,7 @@ def login(client, email="demo@spendly.com", password="demo123"):
 
 # ---- query helpers ----
 
+
 def test_get_user_by_id(client):
     user = queries.get_user_by_id(1)
     assert user["name"] == "Demo User"
@@ -64,7 +65,7 @@ def test_recent_transactions_newest_first(client):
     txns = queries.get_recent_transactions(1)
     assert len(txns) == 8
     assert [t["date"] for t in txns] == sorted((t["date"] for t in txns), reverse=True)
-    assert set(txns[0]) == {"date", "description", "category", "amount"}
+    assert set(txns[0]) == {"id", "date", "description", "category", "amount"}
 
 
 def test_recent_transactions_empty(client):
@@ -99,6 +100,7 @@ def test_queries_are_scoped_to_user(client):
 
 
 # ---- /profile route ----
+
 
 def test_profile_requires_login(client):
     resp = client.get("/profile")
