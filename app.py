@@ -7,16 +7,27 @@ import sqlite3
 from datetime import date, datetime, timedelta
 from functools import wraps
 
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import (
+    Flask,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from database.db import CATEGORIES, get_db, init_db, seed_db
 from database.queries import (
     get_category_breakdown,
+    get_expense_by_id,
     get_recent_transactions,
     get_summary_stats,
     get_user_by_id,
     insert_expense,
+    update_expense,
 )
 
 app = Flask(__name__)
@@ -39,13 +50,16 @@ with app.app_context():
 # Helpers                                                             #
 # ------------------------------------------------------------------ #
 
+
 def login_required(view):
     """Redirect to the login page when no user is signed in."""
+
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("user_id"):
             return redirect(url_for("login"))
         return view(*args, **kwargs)
+
     return wrapped
 
 
@@ -77,6 +91,7 @@ def protect_from_csrf():
 # Routes                                                              #
 # ------------------------------------------------------------------ #
 
+
 @app.route("/")
 def landing():
     return render_template("landing.html")
@@ -102,7 +117,10 @@ def register():
         error = None
 
     if error:
-        return render_template("register.html", error=error, name=name, email=email), 400
+        return (
+            render_template("register.html", error=error, name=name, email=email),
+            400,
+        )
 
     conn = get_db()
     try:
@@ -112,12 +130,15 @@ def register():
         )
         conn.commit()
     except sqlite3.IntegrityError:
-        return render_template(
-            "register.html",
-            error="An account with this email already exists.",
-            name=name,
-            email=email,
-        ), 400
+        return (
+            render_template(
+                "register.html",
+                error="An account with this email already exists.",
+                name=name,
+                email=email,
+            ),
+            400,
+        )
     finally:
         conn.close()
 
@@ -146,9 +167,12 @@ def login():
         conn.close()
 
     if user is None or not check_password_hash(user["password_hash"], password):
-        return render_template(
-            "login.html", error="Invalid email or password.", email=email
-        ), 401
+        return (
+            render_template(
+                "login.html", error="Invalid email or password.", email=email
+            ),
+            401,
+        )
 
     session.clear()
     session["user_id"] = user["id"]
@@ -177,11 +201,15 @@ def privacy():
 # Placeholder routes — students will implement these                  #
 # ------------------------------------------------------------------ #
 
+
 # --- SECTION: transaction history (subagent 1) ---
 def _build_transactions(user_id, date_from=None, date_to=None):
-    transactions = get_recent_transactions(user_id, date_from=date_from, date_to=date_to)
+    transactions = get_recent_transactions(
+        user_id, date_from=date_from, date_to=date_to
+    )
     return [
         {
+            "id": t["id"],
             "date": datetime.strptime(t["date"][:10], "%Y-%m-%d").strftime("%d %b %Y"),
             "description": t["description"] or "",
             "category": t["category"],
@@ -333,7 +361,9 @@ def _validate_expense(form):
         expense_date = datetime.strptime(values["date"], "%Y-%m-%d").date()
     except ValueError:
         return values, "Please enter a valid date."
-    if expense_date < MIN_EXPENSE_DATE or expense_date > date.today() + timedelta(days=MAX_FUTURE_DAYS):
+    if expense_date < MIN_EXPENSE_DATE or expense_date > date.today() + timedelta(
+        days=MAX_FUTURE_DAYS
+    ):
         return values, "Date is out of range."
 
     if len(values["description"]) > 200:
@@ -370,9 +400,36 @@ def add_expense():
     )
 
 
-@app.route("/expenses/<int:id>/edit")
+@app.route("/expenses/<int:id>/edit", methods=["GET", "POST"])
+@login_required
 def edit_expense(id):
-    return "Edit expense — coming in Step 8"
+    user_id = session["user_id"]
+    form = get_expense_by_id(id, user_id)
+    if form is None:
+        abort(404)
+    error = None
+
+    if request.method == "POST":
+        form, error = _validate_expense(request.form)
+        if error is None:
+            update_expense(
+                id,
+                user_id,
+                form["amount"],
+                form["category"],
+                form["date"],
+                form["description"],
+            )
+            flash("Expense updated.", "success")
+            return redirect(url_for("profile"))
+
+    return render_template(
+        "edit_expense.html",
+        expense_id=id,
+        categories=CATEGORIES,
+        form=form,
+        error=error,
+    )
 
 
 @app.route("/expenses/<int:id>/delete")
